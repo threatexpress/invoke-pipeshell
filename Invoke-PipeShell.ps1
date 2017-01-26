@@ -41,6 +41,9 @@ function Invoke-PipeShell {
 
 .PARAMETER Timeout
 	Time in milliseconds a client will consider a server unreachable
+
+.PARAMETER CommandTimeout
+	Time in seconds a command will run until is it considered dead.  The server will return any output it has
 	
 .PARAMETER i
 	Use interactive shell.  If false, a single command will be issued from the -c parameter
@@ -51,7 +54,7 @@ function Invoke-PipeShell {
 .EXAMPLE
 	Server mode, hosts the named pipe.
 
-    C:\PS> Import-Module .\Invoke-PipeShell.ps1; Invoke-PipeShell -mode server -aeskey PmsqQUt2PoYMFNq7 -pipe tapsrv.5604.1234
+    C:\PS> Import-Module .\Invoke-PipeShell.ps1; Invoke-PipeShell -mode server -aeskey PmsqQUt2PoYMFNq7 -pipe tapsrv.5604.1234 -commandtimeout 30
 
 .EXAMPLE
 	Client mode, connects to the named pipe.
@@ -83,16 +86,24 @@ function Invoke-PipeShell {
 		[Parameter(Mandatory=$false)]
 		[Int]$timeout = 1000,
 		[Parameter(Mandatory=$false)]
-		[switch]$i =$FALSE,
+		[Int]$commandtimeout = 120,
 		[Parameter(Mandatory=$false)]
-		[string]$c = ""
-
+		[string]$c = "",
+		[Parameter(Mandatory=$false)]
+		[switch]$i = $FALSE
 	)
 
     if ($AESKey.length -ne 16) {
     	write-host "`n[1] AESKey must be 16 characters in length."
     	exit
     }
+
+    if ($mode -eq "client") {
+	    if ((!$i) -and (!$c)) {
+	    	write-host "`n[!]You must specify Interactive or Command mode (-c or -i)"
+	    	exit
+	    }
+	}
 
     if ($i) {$INTERACTIVE = $TRUE} 
 
@@ -167,36 +178,37 @@ function Invoke-PipeShell {
 	# invoke a job for such commands and IEX for others.
 	function Command-Handler {
 		param($data)
-		#$JobName = "SMBJob-$(Random-16)"
-		#$PoshJob = Start-Job -Name $JobName -Scriptblock ([scriptblock]::Create($data))
-		#Wait-Job -Name $PoshJob.Name| Out-Null
-        
-        #write-host "Result"
-        #write-host $JobResult
 
-		#if ($((Get-Job $PoshJob.Name).HasMoreData) -eq $true) {
-		#	# On Win10+ even jobs with no results show HasMoreData=True
-		#	$JobResult = $(Receive-Job -Name $PoshJob.Name 2>&1|Out-String)
-            
+		try {
+			$JobName = "SMBJob-$(Random-16)"
 
-           
-		#	if (!$JobResult) {
-		#		echo "Job $($PoshJob.Name) completed successfully!"
-		#	} else {
-		#		$JobResult.trim()
-		#	}
-		#} else {
-		#	if($((Get-Job $PoshJob.Name).State) -eq "Failed"){
-		#		(Get-Job $PoshJob.Name).ChildJobs[0].JobStateInfo.Reason.Message
-		#	} else {
-		#		echo "Job $($PoshJob.Name) completed successfully!"
-		#	}
-		#}
+			$s = [scriptblock]::Create($data)
 
-        $JobResult = IEX $data 2>&1 | Out-String
-        if (!($JobResult)) {
-            $JobResult = " "
-        }
+			$PoshJob = Start-Job -Name $JobName -Scriptblock ($s)
+			Wait-Job -Timeout $commandtimeout -Name $PoshJob.Name| Out-Null
+
+			#if ($((Get-Job $PoshJob.Name).HasMoreData) -eq $true) {
+				# On Win10+ even jobs with no results show HasMoreData=True
+			$JobResult = $(Receive-Job -Name $PoshJob.Name 2>&1|Out-String)
+	            
+			if ($JobResult -eq $null) {
+				$JobResult = "No Output"
+		    }
+
+		    if (!$JobResult) {
+				$JobResult = "No Output"
+		    }
+
+		    if ($JobResult -eq "") {
+				$JobResult = "No Output"
+		    }
+
+		} catch{
+			write-host "ERROR"
+			$JobResult = "ERROR"
+		}
+
+		
         Return $JobResult
 	}
 
@@ -286,6 +298,14 @@ function Invoke-PipeShell {
 
 		catch {
 			# Maybe add real error handling some day...
+			$ErrorMessage = $_.Exception.Message
+    		$FailedItem = $_.Exception.ItemName
+    		$line = $_.InvocationInfo.ScriptLineNumber
+
+    		write-host "ERROR:"
+    		write-host $ErrorMessage
+    		write-host $FailedItem
+    		write-host "Error on line : $line"
 
 		}
 
@@ -307,16 +327,32 @@ function Invoke-PipeShell {
 		}
 	}
 
+	if ($PipeMode -eq "Client") {
+
+			$ClientConfig = @"
+
++-----------------------------------
+| Host Name      : $Env:COMPUTERNAME
+| Named Pipe     : $Pipe
+| AES Key        : $AESKey
+| Timeout        : $Timeout
++-----------------------------------
+"@
+		$ClientConfig
+
+	}
+
 	# Generate Key/Pipe
 	if ($PipeMode -eq "Server") {
 		$PipeObject = New-Object System.IO.Pipes.NamedPipeServerStream($Pipe, [System.IO.Pipes.PipeDirection]::InOut)
 		$ServerConfig = @"
 
-+-------
-| Host Name : $Env:COMPUTERNAME
-| Named Pipe: $Pipe
-| AES Key   : $AESKey
-+-------
++-----------------------------------
+| Host Name      : $Env:COMPUTERNAME
+| Named Pipe     : $Pipe
+| AES Key        : $AESKey
+| CommandTimeout : $CommandTimeout
++-----------------------------------
 "@
 		$ServerConfig
 	} else {
