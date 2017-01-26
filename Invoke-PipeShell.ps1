@@ -167,27 +167,37 @@ function Invoke-PipeShell {
 	# invoke a job for such commands and IEX for others.
 	function Command-Handler {
 		param($data)
-		$JobName = "SMBJob-$(Random-16)"
-		$PoshJob = Start-Job -Name $JobName -Scriptblock ([scriptblock]::Create($data))
-		Wait-Job -Name $PoshJob.Name| Out-Null
+		#$JobName = "SMBJob-$(Random-16)"
+		#$PoshJob = Start-Job -Name $JobName -Scriptblock ([scriptblock]::Create($data))
+		#Wait-Job -Name $PoshJob.Name| Out-Null
+        
+        #write-host "Result"
+        #write-host $JobResult
 
-		if ($((Get-Job $PoshJob.Name).HasMoreData) -eq $true) {
-			# On Win10+ even jobs with no results show HasMoreData=True
-			$JobResult = $(Receive-Job -Name $PoshJob.Name 2>&1|Out-String)
-			if (!$JobResult) {
-				echo "Job $($PoshJob.Name) completed successfully!"
-			} else {
-				$JobResult.trim()
-			}
-		} else {
-			if($((Get-Job $PoshJob.Name).State) -eq "Failed"){
-				(Get-Job $PoshJob.Name).ChildJobs[0].JobStateInfo.Reason.Message
-			} else {
-				echo "Job $($PoshJob.Name) completed successfully!"
-			}
-		}
-		
-		Remove-Job -Name $PoshJob.Name
+		#if ($((Get-Job $PoshJob.Name).HasMoreData) -eq $true) {
+		#	# On Win10+ even jobs with no results show HasMoreData=True
+		#	$JobResult = $(Receive-Job -Name $PoshJob.Name 2>&1|Out-String)
+            
+
+           
+		#	if (!$JobResult) {
+		#		echo "Job $($PoshJob.Name) completed successfully!"
+		#	} else {
+		#		$JobResult.trim()
+		#	}
+		#} else {
+		#	if($((Get-Job $PoshJob.Name).State) -eq "Failed"){
+		#		(Get-Job $PoshJob.Name).ChildJobs[0].JobStateInfo.Reason.Message
+		#	} else {
+		#		echo "Job $($PoshJob.Name) completed successfully!"
+		#	}
+		#}
+
+        $JobResult = IEX $data 2>&1 | Out-String
+        if (!($JobResult)) {
+            $JobResult = " "
+        }
+        Return $JobResult
 	}
 
 	function Initialize-Pipe {
