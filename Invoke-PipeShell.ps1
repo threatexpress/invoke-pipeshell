@@ -94,14 +94,14 @@ function Invoke-PipeShell {
 	)
 
     if ($AESKey.length -ne 16) {
-    	write-host "`n[1] AESKey must be 16 characters in length."
-    	exit
+    	Write-Output "`n[1] AESKey must be 16 characters in length."
+    	return
     }
 
     if ($mode -eq "client") {
 	    if ((!$i) -and (!$c)) {
-	    	write-host "`n[!]You must specify Interactive or Command mode (-c or -i)"
-	    	exit
+	    	Write-Output "`n[!]You must specify Interactive or Command mode (-c or -i)"
+	    	return
 	    }
 	}
 
@@ -204,10 +204,9 @@ function Invoke-PipeShell {
 		    }
 
 		} catch{
-			write-host "ERROR"
+			Write-Output "ERROR"
 			$JobResult = "ERROR"
 		}
-
 		
         Return $JobResult
 	}
@@ -278,13 +277,19 @@ function Invoke-PipeShell {
 			
 					if ($Command) {
 						if ($(Read-Data -data $command) -eq "leave") {
-							$PipeWriter.WriteLine($(Write-Data -data "`n[!] Client disconnecting.."))
-							write-host "Client disconnecting.."
-							break
+
+							if ($INTERACTIVE) { 
+								$PipeWriter.WriteLine($(Write-Data -data "`n[!] Client disconnecting.."))
+								Write-Output "Client disconnecting.."
+								break
+							} else { # Non-interactive
+								Write-Output "Client disconnecting.."
+								break
+							}
 
 					} elseif ($(Read-Data -data $command) -eq "kill") {
 							$PipeWriter.WriteLine($(Write-Data -data "`n[!] Killing server.."))
-							write-host "Killing server.."
+							Write-Output "Killing server.."
 							break
 
 						} else {
@@ -302,10 +307,10 @@ function Invoke-PipeShell {
     		$FailedItem = $_.Exception.ItemName
     		$line = $_.InvocationInfo.ScriptLineNumber
 
-    		write-host "ERROR:"
-    		write-host $ErrorMessage
-    		write-host $FailedItem
-    		write-host "Error on line : $line"
+    		Write-Output "ERROR:"
+    		Write-Output $ErrorMessage
+    		Write-Output $FailedItem
+    		Write-Output "Error on line : $line"
 
 		}
 
@@ -327,26 +332,11 @@ function Invoke-PipeShell {
 		}
 	}
 
-	if ($PipeMode -eq "Client") {
-
-			$ClientConfig = @"
-
-+-----------------------------------
-| Host Name      : $Env:COMPUTERNAME
-| Named Pipe     : $Pipe
-| AES Key        : $AESKey
-| Timeout        : $Timeout
-+-----------------------------------
-"@
-		$ClientConfig
-
-	}
-
 	# Generate Key/Pipe
 	if ($PipeMode -eq "Server") {
-		$PipeObject = New-Object System.IO.Pipes.NamedPipeServerStream($Pipe, [System.IO.Pipes.PipeDirection]::InOut)
+		Try {$PipeObject = New-Object System.IO.Pipes.NamedPipeServerStream($Pipe, [System.IO.Pipes.PipeDirection]::InOut)}
+		Catch {Write-Error $_;Return}
 		$ServerConfig = @"
-
 +-----------------------------------
 | Host Name      : $Env:COMPUTERNAME
 | Named Pipe     : $Pipe
@@ -355,8 +345,19 @@ function Invoke-PipeShell {
 +-----------------------------------
 "@
 		$ServerConfig
-	} else {
-		$PipeObject = new-object System.IO.Pipes.NamedPipeClientStream($Server, $Pipe, [System.IO.Pipes.PipeDirection]::InOut, [System.IO.Pipes.PipeOptions]::None, [System.Security.Principal.TokenImpersonationLevel]::Impersonation)
+	
+	} else { # Client Mode
+		Try {$PipeObject = new-object System.IO.Pipes.NamedPipeClientStream($Server, $Pipe, [System.IO.Pipes.PipeDirection]::InOut, [System.IO.Pipes.PipeOptions]::None, [System.Security.Principal.TokenImpersonationLevel]::Impersonation)}
+		Catch {Write-Error $_;Return}
+		$ClientConfig = @"
++-----------------------------------
+| Host Name      : $Env:COMPUTERNAME
+| Named Pipe     : $Pipe
+| AES Key        : $AESKey
+| Timeout        : $Timeout
++-----------------------------------
+"@		
+		$ClientConfig
 	}
 
 	Initialize-Pipe
